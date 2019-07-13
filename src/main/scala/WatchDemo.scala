@@ -3,13 +3,16 @@ import java.net.URI
 import java.nio.file._
 import java.util.zip.{ZipEntry, ZipInputStream}
 
+import scala.sys.process.ProcessBuilder.Source
+
 object WatchDemo {
 
   def main(args: Array[String]): Unit = {
     println("HelloWorld")
 
     //unzip(Paths.get("/home/cw/Work/hi.zip"), Paths.get("/home/cw/unzipFiles/"))
-    unzipFiles()
+    //unzipFiles()
+    watch()
 
     //zipFile(Paths.get("/home/cw/zipfiles/hi.txt"), Paths.get("/home/cw/Work/hi.zip"))
     //zipFile2(Paths.get("/home/cw/zipFiles/hi.txt"), "/home/cw/unzipFiles/hi.zip")
@@ -24,54 +27,75 @@ object WatchDemo {
     = FileSystems.getDefault.newWatchService
 
 
-    val path = Paths.get("/home/cw")
+    val path = Paths.get("/home/cw/Work")
+    val unzipPath = Paths.get("/home/cw/unzipFiles")
     path.register(
       watchService,
-      StandardWatchEventKinds.ENTRY_CREATE,
-      StandardWatchEventKinds.ENTRY_DELETE,
-      StandardWatchEventKinds.ENTRY_MODIFY)
+      StandardWatchEventKinds.ENTRY_CREATE)
 
     var key:WatchKey = watchService.take()
 
     while (key != null){
       key.pollEvents().forEach{ x =>
+
         println(s"Event kind: ${x.kind} . File affected: ${x.context}")
+
+        Thread.sleep(5000)
+        unzipFiles(unzipPath, path.resolve(x.context.toString))
+
+        println("unzip End")
+
       }
       key.reset()
       key = watchService.take()
     }
   }
 
-  def unzipFiles() = {
+  def unzipFiles(outDir: Path, source: Path) = {
 
     val buffer = new Array[Byte](1024)
-    val outDir = Paths.get("/home/cw/unzipFiles/")
-    val zipFileName = "/home/cw/Work/hi.zip"
-    val stream = new ZipInputStream(new BufferedInputStream(new FileInputStream(zipFileName)))
+    val stream = new ZipInputStream(new BufferedInputStream(new FileInputStream(source.toFile)))
+    val entry = stream.getNextEntry
+    doReadZipFile(entry, outDir, buffer, stream)
 
-    var entry = stream.getNextEntry
-
-    while (entry != null){
-      println("Unzipping: " + entry.getName)
-
-      val filePath = outDir.resolve(entry.getName)
-
-      val fos = new FileOutputStream(filePath.toFile)
-
-      val bos = new BufferedOutputStream(fos, buffer.length)
-
-      var size: Int = stream.read(buffer, 0, buffer.length)
-
-      while (size != -1){
-
-        bos.write(buffer, 0, size)
-        size = stream.read(buffer, 0, buffer.length)
-      }
-      bos.flush()
-      fos.close()
-      entry = stream.getNextEntry
-    }
     stream.close()
+  }
+
+  def doReadZipFile(entry: ZipEntry, outDir: Path, buffer: Array[Byte], stream: ZipInputStream):Int = {
+    entry match {
+      case s:ZipEntry => {
+        println("Unzipping: " + s.getName)
+        val filePath = outDir.resolve(s.getName)
+        val bos = new BufferedOutputStream(new FileOutputStream(filePath.toFile), buffer.length)
+        val size: Int = stream.read(buffer)
+        doWriteUnzipFiles(size, bos, buffer, stream)
+        bos.flush()
+        doReadZipFile(stream.getNextEntry, outDir, buffer, stream)
+        /*
+        *  close every stream when call ends
+        * */
+        bos.close()
+        1
+      }
+      case _ => 0
+    }
+
+  }
+  def doWriteUnzipFiles(size: Int, bos: BufferedOutputStream, buffer: Array[Byte], stream: ZipInputStream):Int = {
+
+    size match {
+      case x if x != -1 => {
+        bos.write(buffer, 0, x)
+        doWriteUnzipFiles(stream.read(buffer), bos, buffer, stream)
+      }
+      case _ => 0
+    }
+    /*
+    if(size != -1){
+      bos.write(buffer, 0, size)
+      doWriteUnzipFiles(stream.read(buffer), bos, buffer, stream)
+    }
+    else 0*/
 
   }
 
